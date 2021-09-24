@@ -23,6 +23,7 @@ import com.tencent.mtt.hippy.serialization.nio.reader.BinaryReader;
 import com.tencent.mtt.hippy.serialization.nio.reader.SafeDirectReader;
 import com.tencent.mtt.hippy.serialization.nio.reader.SafeHeapReader;
 import com.tencent.mtt.hippy.serialization.string.InternalizedStringTable;
+import com.tencent.mtt.hippy.devsupport.inspector.Inspector;
 import com.tencent.mtt.hippy.utils.UIThreadUtils;
 import com.tencent.mtt.hippy.utils.UrlUtils;
 import java.io.ByteArrayOutputStream;
@@ -31,11 +32,13 @@ import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.text.TextUtils;
+
 import com.tencent.mtt.hippy.common.HippyArray;
 import com.tencent.mtt.hippy.devsupport.DebugWebSocketClient;
 import com.tencent.mtt.hippy.devsupport.DevRemoteDebugProxy;
@@ -106,9 +109,9 @@ public class HippyBridgeImpl implements HippyBridge, DevRemoteDebugProxy.OnRecei
       if (TextUtils.isEmpty(mDebugServerHost)) {
         mDebugServerHost = "localhost:38989";
       }
-
+      String clientId = mContext.getDevSupportManager().getDevInstanceUUID();  // 方便区分不同的 Hippy 调试页面
       mDebugWebSocketClient.connect(
-          String.format(Locale.US, "ws://%s/debugger-proxy?role=android_client", mDebugServerHost),
+          String.format(Locale.US, "ws://%s/debugger-proxy?role=android_client&clientId=%s", mDebugServerHost, clientId),
           new DebugWebSocketClient.JSDebuggerCallback() {
             @SuppressWarnings("unused")
             @Override
@@ -132,7 +135,7 @@ public class HippyBridgeImpl implements HippyBridge, DevRemoteDebugProxy.OnRecei
   private void initJSEngine(int groupId) {
     synchronized (HippyBridgeImpl.class) {
       try {
-        byte[] globalConfig = mDebugGlobalConfig.getBytes("UTF-16LE");
+        byte[] globalConfig = mDebugGlobalConfig.getBytes(StandardCharsets.UTF_16LE);
         mV8RuntimeId = initJSFramework(globalConfig, mSingleThreadMode, enableV8Serialization, mIsDevModule, mDebugInitJSFrameworkCallback, groupId);
         mInit = true;
       } catch (Throwable e) {
@@ -157,6 +160,15 @@ public class HippyBridgeImpl implements HippyBridge, DevRemoteDebugProxy.OnRecei
 
     if (!TextUtils.isEmpty(codeCacheTag) && !TextUtils.isEmpty(mCodeCacheRootDir)) {
       String codeCacheDir = mCodeCacheRootDir + codeCacheTag + File.separator;
+      File codeCacheFile = new File(codeCacheDir);
+      if (!codeCacheFile.exists()) {
+        boolean ret = codeCacheFile.mkdirs();
+        if (!ret) {
+          canUseCodeCache = false;
+          codeCacheDir = "";
+        }
+      }
+
       return runScriptFromUri(uri, assetManager, canUseCodeCache, codeCacheDir, mV8RuntimeId,
           callback);
     } else {
@@ -393,10 +405,10 @@ public class HippyBridgeImpl implements HippyBridge, DevRemoteDebugProxy.OnRecei
   @Override
   public void onReceiveData(String msg) {
     if (this.mIsDevModule) {
-      try {
-        callFunction("onWebsocketMsg", null, msg.getBytes("UTF-16LE"));
-      } catch (UnsupportedEncodingException e) {
-        e.printStackTrace();
+      boolean isInspectMsg = Inspector.getInstance(mContext)
+        .setWebSocketClient(mDebugWebSocketClient).dispatchReqFromFrontend(mContext, msg);
+      if (!isInspectMsg) {
+        callFunction("onWebsocketMsg", null, msg.getBytes(StandardCharsets.UTF_16LE));
       }
     }
   }

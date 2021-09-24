@@ -41,11 +41,12 @@ import com.tencent.mtt.hippy.serialization.nio.writer.SafeDirectWriter;
 import com.tencent.mtt.hippy.serialization.nio.writer.SafeHeapWriter;
 import com.tencent.mtt.hippy.utils.ArgumentUtils;
 import com.tencent.mtt.hippy.utils.DimensionsUtil;
-import com.tencent.mtt.hippy.utils.LogUtils;
+import com.tencent.mtt.hippy.utils.I18nUtil;
 import com.tencent.mtt.hippy.utils.UIThreadUtils;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import org.json.JSONObject;
 
@@ -178,11 +179,8 @@ public class HippyBridgeManagerImpl implements HippyBridgeManager, HippyBridge.B
       } else {
         mStringBuilder.setLength(0);
         byte[] bytes = new byte[0];
-        try {
-          bytes = ArgumentUtils.objectToJsonOpt((HippyMap) msg.obj, mStringBuilder).getBytes("UTF-16LE");
-        } catch (UnsupportedEncodingException e) {
-          e.printStackTrace();
-        }
+        bytes = ArgumentUtils.objectToJsonOpt((HippyMap) msg.obj, mStringBuilder).getBytes(
+            StandardCharsets.UTF_16LE);
         buffer = ByteBuffer.allocateDirect(bytes.length);
         buffer.put(bytes);
       }
@@ -206,11 +204,8 @@ public class HippyBridgeManagerImpl implements HippyBridgeManager, HippyBridge.B
       } else {
         mStringBuilder.setLength(0);
         byte[] bytes = new byte[0];
-        try {
-          bytes = ArgumentUtils.objectToJsonOpt((HippyMap) msg.obj, mStringBuilder).getBytes("UTF-16LE");
-        } catch (UnsupportedEncodingException e) {
-          e.printStackTrace();
-        }
+        bytes = ArgumentUtils.objectToJsonOpt((HippyMap) msg.obj, mStringBuilder).getBytes(
+            StandardCharsets.UTF_16LE);
         mHippyBridge.callFunction(action, callback, bytes);
       }
     }
@@ -475,10 +470,6 @@ public class HippyBridgeManagerImpl implements HippyBridgeManager, HippyBridge.B
 
   @Override
   public void execCallback(Object params, BridgeTransferType transferType) {
-    if (!mIsInit) {
-      return;
-    }
-
     Message message = mHandler
         .obtainMessage(MSG_CODE_CALL_FUNCTION, transferType.value(), FUNCTION_ACTION_CALLBACK,
             params);
@@ -528,7 +519,7 @@ public class HippyBridgeManagerImpl implements HippyBridgeManager, HippyBridge.B
 
   @Override
   public void callNatives(String moduleName, String moduleFunc, String callId, HippyArray params) {
-    if (mIsInit && mContext != null && mContext.getModuleManager() != null) {
+    if (mContext != null && mContext.getModuleManager() != null) {
       HippyModuleManager manager = mContext.getModuleManager();
       if (manager != null) {
         HippyCallNativeParams callNativeParams = HippyCallNativeParams
@@ -605,6 +596,13 @@ public class HippyBridgeManagerImpl implements HippyBridgeManager, HippyBridge.B
     platformParams.pushString("VersionName", (versionName == null) ? "" : versionName);
     platformParams.pushInt("APILevel", Build.VERSION.SDK_INT);
     platformParams.pushBoolean("NightMode", getNightMode());
+
+    HippyMap Localization = new HippyMap();
+    Localization.pushString("language", I18nUtil.getLanguage());
+    Localization.pushString("country", I18nUtil.getCountry());
+    Localization.pushInt("direction", I18nUtil.getLayoutDirection());
+    platformParams.pushMap("Localization", Localization);
+
     globalParams.pushMap("Platform", platformParams);
 
     HippyMap tkd = new HippyMap();

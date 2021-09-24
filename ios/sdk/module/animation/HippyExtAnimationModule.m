@@ -127,11 +127,10 @@ HIPPY_EXPORT_METHOD(createAnimationSet:(NSNumber *__nonnull)animationId animatio
         NSNumber *subAnimationId = info[@"animationId"];
         BOOL follow = [info[@"follow"] boolValue];
         HippyExtAnimation *ani = self->_animationById[subAnimationId];
-#ifdef NSAssert
         if (ani == nil) {
             HippyAssert(ani != nil, @"create group animation but use illege sub animaiton");
+            return;
         }
-#endif
         ani.bFollow = follow;
         [anis addObject: ani];
     }];
@@ -355,7 +354,7 @@ HIPPY_EXPORT_METHOD(destroyAnimation:(NSNumber * __nonnull)animationId) {
 - (NSDictionary *)bindAnimaiton:(NSDictionary *)params viewTag:(NSNumber *)viewTag rootTag:(NSNumber *)rootTag {
     [_lock lock];
 
-    HippyExtAnimationViewParams *p = [[HippyExtAnimationViewParams alloc] initWithParams:params viewTag:viewTag rootTag:rootTag];
+    HippyExtAnimationViewParams *p = [[HippyExtAnimationViewParams alloc] initWithParams:params bridge:self.bridge viewTag:viewTag rootTag:rootTag];
     [p parse];
 
     BOOL contain = [self alreadyConnectAnimation:p];
@@ -425,6 +424,10 @@ HIPPY_EXPORT_METHOD(destroyAnimation:(NSNumber * __nonnull)animationId) {
 
 - (BOOL)alreadyConnectAnimation:(HippyExtAnimationViewParams *)p {
     return [[_paramsByHippyTag allValues] containsObject:p];
+}
+
+- (HippyExtAnimation *)animationFromID:(NSNumber *)animationID {
+    return _animationById[animationID];
 }
 
 @end
