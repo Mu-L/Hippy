@@ -31,14 +31,13 @@
  */
 typedef void (^ViewPagerItemsCountChanged)(NSUInteger count);
 
-@interface HippyViewPager : UIScrollView <UIScrollViewDelegate, HippyInvalidating>
+@interface HippyViewPager : UIScrollView <UIScrollViewDelegate, HippyScrollableProtocol, HippyInvalidating>
 @property (nonatomic, strong) HippyDirectEventBlock onPageSelected;
 @property (nonatomic, strong) HippyDirectEventBlock onPageScroll;
 @property (nonatomic, strong) HippyDirectEventBlock onPageScrollStateChanged;
 
 @property (nonatomic, assign) NSInteger initialPage;
 @property (nonatomic, assign) CGPoint targetOffset;
-@property (nonatomic, assign) BOOL loop;
 @property (nonatomic, assign, readonly) NSUInteger pageCount;
 @property (nonatomic, copy) ViewPagerItemsCountChanged itemsChangedBlock;
 

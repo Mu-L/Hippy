@@ -23,6 +23,16 @@
 #import "HippyView.h"
 
 @interface HippyBaseTextInput : HippyView
+
+/// Font property - FontSize
+@property (nonatomic, strong) NSNumber *fontSize;
+/// Font property - FontWeight
+@property (nonatomic, strong) NSString *fontWeight;
+/// Font property - FontStyle
+@property (nonatomic, strong) NSString *fontStyle;
+/// Font property - FontFamily
+@property (nonatomic, strong) NSString *fontFamily;
+
 @property (nonatomic, strong) UIFont *font;
 @property (nonatomic, assign) UIEdgeInsets contentInset;
 @property (nonatomic, copy) NSString *value;
@@ -31,6 +41,7 @@
 - (void)blur;
 - (void)clearText;
 - (void)keyboardWillShow:(NSNotification *)aNotification;
+- (void)keyboardWillHide:(NSNotification *)aNotification;
 - (void)keyboardHeightChanged:(NSNotification *)aNotification;
 
 @end

@@ -40,6 +40,8 @@
 #import "UIView+Hippy.h"
 #import "HippyBridge+Mtt.h"
 #import "HippyBundleURLProvider.h"
+#import "HippyDeviceBaseInfo.h"
+
 
 NSString *const HippyContentDidAppearNotification = @"HippyContentDidAppearNotification";
 
@@ -128,66 +130,36 @@ NSString *const HippyContentDidAppearNotification = @"HippyContentDidAppearNotif
     return self;
 }
 
-- (instancetype)initWithBundleURL:(NSURL *)bundleURL
-                       moduleName:(NSString *)moduleName
-                initialProperties:(NSDictionary *)initialProperties
-                    launchOptions:(NSDictionary *)launchOptions
-                     shareOptions:(NSDictionary *)shareOptions
-                        debugMode:(BOOL)mode
-                         delegate:(id<HippyRootViewDelegate>)delegate
-
-{
-    NSMutableDictionary *extendsLaunchOptions = [NSMutableDictionary new];
-    [extendsLaunchOptions addEntriesFromDictionary:launchOptions];
-    [extendsLaunchOptions setObject:@(mode) forKey:@"DebugMode"];
-    HippyBridge *bridge = [[HippyBridge alloc] initWithBundleURL:bundleURL moduleProvider:nil launchOptions:extendsLaunchOptions
-                                                     executorKey:moduleName];
-    return [self initWithBridge:bridge moduleName:moduleName initialProperties:initialProperties shareOptions:shareOptions delegate:delegate];
-}
-
 - (instancetype)initWithBridge:(HippyBridge *)bridge
                    businessURL:(NSURL *)businessURL
                     moduleName:(NSString *)moduleName
              initialProperties:(NSDictionary *)initialProperties
-                 launchOptions:(NSDictionary *)launchOptions
                   shareOptions:(NSDictionary *)shareOptions
-                     debugMode:(BOOL)mode
                       delegate:(id<HippyRootViewDelegate>)delegate {
-    if (mode) {
-        NSString *bundleStr = [HippyBundleURLProvider sharedInstance].bundleURLString;
-        NSURL *bundleUrl = [NSURL URLWithString:bundleStr];
-
-        if (self = [self initWithBundleURL:bundleUrl moduleName:moduleName initialProperties:initialProperties launchOptions:launchOptions
-                              shareOptions:shareOptions
-                                 debugMode:mode
-                                  delegate:delegate]) {
-        }
-        return self;
-    } else {
-        bridge.batchedBridge.useCommonBridge = YES;
-        if (self = [self initWithBridge:bridge moduleName:moduleName initialProperties:initialProperties shareOptions:shareOptions
-                               delegate:delegate]) {
-            if (!bridge.isLoading && !bridge.isValid) {
-                if (delegate && [delegate respondsToSelector:@selector(rootView:didLoadFinish:)]) {
-                    [delegate rootView:self didLoadFinish:NO];
-                }
-            } else {
-                __weak __typeof__(self) weakSelf = self;
-                [bridge loadSecondary:businessURL loadBundleCompletion:nil enqueueScriptCompletion:nil completion:^(BOOL success) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (success) {
-                            [weakSelf bundleFinishedLoading:bridge.batchedBridge];
-                        }
-                        
-                        if ([delegate respondsToSelector:@selector(rootView:didLoadFinish:)]) {
-                            [delegate rootView:weakSelf didLoadFinish:success];
-                        }
-                    });
-                }];
+    NSParameterAssert(bridge);
+    bridge.batchedBridge.useCommonBridge = YES;
+    if (self = [self initWithBridge:bridge moduleName:moduleName initialProperties:initialProperties shareOptions:shareOptions
+                           delegate:delegate]) {
+        if (!bridge.isLoading && !bridge.isValid) {
+            if (delegate && [delegate respondsToSelector:@selector(rootView:didLoadFinish:)]) {
+                [delegate rootView:self didLoadFinish:NO];
             }
+        } else {
+            __weak __typeof__(self) weakSelf = self;
+            [bridge loadSecondary:businessURL loadBundleCompletion:nil enqueueScriptCompletion:nil completion:^(BOOL success) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (success) {
+                        [weakSelf bundleFinishedLoading:bridge.batchedBridge];
+                    }
+                    
+                    if ([delegate respondsToSelector:@selector(rootView:didLoadFinish:)]) {
+                        [delegate rootView:weakSelf didLoadFinish:success];
+                    }
+                });
+            }];
         }
-        return self;
     }
+    return self;
 }
 
 HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithFrame : (CGRect)frame)
@@ -200,6 +172,10 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
 
 - (UIViewController *)hippyViewController {
     return _hippyViewController ?: [super hippyViewController];
+}
+
+- (UIView *)contentView {
+    return _contentView;
 }
 
 - (BOOL)canBecomeFirstResponder {
@@ -418,7 +394,32 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
     [[_contentView touchHandler] cancelTouch];
 }
 
+#pragma mark -
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 12.0, *)) {
+        // on dark mode change
+        UIUserInterfaceStyle currentStyle = self.traitCollection.userInterfaceStyle;
+        if (currentStyle != previousTraitCollection.userInterfaceStyle) {
+            BOOL isNightMode = (UIUserInterfaceStyleDark == currentStyle);
+            if (self.bridge.isOSNightMode != isNightMode) {
+                [self.bridge setOSNightMode:isNightMode withRootViewTag:self.hippyTag];
+            }
+        }
+    }
+}
+
+static NSString *const HippyHostControllerSizeKeyNewSize = @"NewSize";
+- (void)onHostControllerTransitionedToSize:(CGSize)size {
+    [NSNotificationCenter.defaultCenter postNotificationName:HippyDimensionsShouldUpdateNotification
+                                                      object:nil
+                                                    userInfo:@{HippyHostControllerSizeKeyNewSize : @(size)}];
+}
+
 @end
+
+#pragma mark -
 
 @implementation HippyUIManager (HippyRootView)
 
@@ -435,7 +436,6 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
 
 @implementation HippyRootContentView {
     __weak HippyBridge *_bridge;
-    UIColor *_backgroundColor;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -481,17 +481,6 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (nonnull NSCoder *)aDecoder
             [_bridge.uiManager setFrame:frame fromOriginFrame:originFrame forView:self];
         }
     }
-}
-
-- (void)setBackgroundColor:(UIColor *)backgroundColor {
-    _backgroundColor = backgroundColor;
-    if (self.hippyTag && _bridge.isValid) {
-        [_bridge.uiManager setBackgroundColor:backgroundColor forView:self];
-    }
-}
-
-- (UIColor *)backgroundColor {
-    return _backgroundColor;
 }
 
 - (void)invalidate {

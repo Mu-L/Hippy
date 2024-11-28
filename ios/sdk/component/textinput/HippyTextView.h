@@ -35,6 +35,9 @@
 @end
 
 @interface HippyUITextView : UITextView
+/// iOS18's UITextInput adds an `editable` property, which conflicts with the one defined in HippyUITextField.
+/// For consistency, we added a canEdit property here too, which has the same meaning as editable
+@property (nonatomic, assign) BOOL canEdit;
 @property (nonatomic, assign) BOOL textWasPasted;
 @property (nonatomic, weak) id<HippyUITextViewResponseDelegate> responderDelegate;
 @end
@@ -48,7 +51,6 @@
 @property (nonatomic, assign) BOOL blurOnSubmit;
 @property (nonatomic, assign) BOOL clearTextOnFocus;
 @property (nonatomic, assign) BOOL selectTextOnFocus;
-//@property (nonatomic, assign) UIEdgeInsets contentInset;
 @property (nonatomic, assign) BOOL automaticallyAdjustContentInsets;
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, strong) UIColor *placeholderTextColor;
@@ -64,19 +66,22 @@
 - (void)performTextUpdate;
 
 @property (nonatomic, copy) NSString *value;
-@property (nonatomic, strong) NSNumber *fontSize;
 @property (nonatomic, strong) NSString *defaultValue;
 @property (nonatomic, strong) UIColor *textColor;
+
+/// ParagraphStyles - lineHeight
+@property (nonatomic, strong) NSNumber *lineHeight;
+/// ParagraphStyles - lineSpacing
+@property (nonatomic, strong) NSNumber *lineSpacing;
+/// ParagraphStyles - lineHeightMultiple
+@property (nonatomic, strong) NSNumber *lineHeightMultiple;
+
 @property (nonatomic, copy) HippyDirectEventBlock onChangeText;
 @property (nonatomic, copy) HippyDirectEventBlock onBlur;
 @property (nonatomic, copy) HippyDirectEventBlock onFocus;
 @property (nonatomic, copy) HippyDirectEventBlock onKeyboardWillShow;
+@property (nonatomic, copy) HippyDirectEventBlock onKeyboardWillHide;
 @property (nonatomic, copy) HippyDirectEventBlock onKeyboardHeightChanged;
 
-- (void)focus;
-- (void)blur;
-- (void)keyboardWillShow:(NSNotification *)aNotification;
-- (void)keyboardHeightChanged:(NSNotification *)aNotification;
-- (void)clearText;
 - (void)updateFrames;
 @end

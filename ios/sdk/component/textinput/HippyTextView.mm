@@ -73,14 +73,19 @@
     }
 }
 
-- (void)dealloc {
-    _responderDelegate = nil;
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+- (void)setCanEdit:(BOOL)canEdit {
+    _canEdit = canEdit;
+    [self setEditable:canEdit];
 }
 
 @end
 
 @interface HippyTextView () <HippyUITextViewResponseDelegate>
+
+/// ParagraphStyle for TextView and PlaceholderView,
+/// used for lineHeight config and etc.
+@property (nonatomic, strong) NSMutableParagraphStyle *paragraphStyle;
+
 @end
 
 @implementation HippyTextView {
@@ -103,7 +108,12 @@
     BOOL _viewDidCompleteInitialLayout;
 }
 
-//当键盘出现或改变时调用
+@dynamic lineHeight;
+@dynamic lineSpacing;
+@dynamic lineHeightMultiple;
+
+#pragma mark - Keyboard Events
+
 - (void)keyboardWillShow:(NSNotification *)aNotification {
     [super keyboardWillShow:aNotification];
     //获取键盘的高度
@@ -113,6 +123,13 @@
     CGFloat keyboardHeight = keyboardRect.size.height;
     if (self.isFirstResponder && _onKeyboardWillShow) {
         _onKeyboardWillShow(@{ @"keyboardHeight": @(keyboardHeight) });
+    }
+}
+
+- (void)keyboardWillHide:(NSNotification *)aNotification {
+    [super keyboardWillHide:aNotification];
+    if (_onKeyboardWillHide) {
+        _onKeyboardWillHide(@{});
     }
 }
 
@@ -129,7 +146,6 @@
 
 - (instancetype)init {
     if ((self = [super initWithFrame:CGRectZero])) {
-        //    _contentInset = UIEdgeInsetsZero;
         [self setContentInset:UIEdgeInsetsZero];
         _placeholderTextColor = [self defaultPlaceholderTextColor];
         _blurOnSubmit = NO;
@@ -146,9 +162,10 @@
         _scrollView.scrollsToTop = NO;
         [_scrollView addSubview:_textView];
 
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(textFieldEditChanged:) name:UITextViewTextDidChangeNotification
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(textFieldEditChanged:)
+                                                     name:UITextViewTextDidChangeNotification
                                                    object:_textView];
-
         [self addSubview:_scrollView];
     }
     return self;
@@ -289,21 +306,23 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
 }
 
 - (void)updateContentSize {
-    CGSize size = (CGSize) { _scrollView.frame.size.width, INFINITY };
-    size.height = [_textView sizeThatFits:size].height;
-    _scrollView.contentSize = size;
-    _textView.frame = (CGRect) { CGPointZero, size };
-
-    if (_viewDidCompleteInitialLayout && _onContentSizeChange && !CGSizeEqualToSize(_previousContentSize, size)) {
-        _previousContentSize = size;
+    CGSize contentSize = (CGSize) { CGRectGetMaxX(_scrollView.frame), INFINITY };
+    contentSize.height = [_textView sizeThatFits:contentSize].height;
+    
+    if (_viewDidCompleteInitialLayout && _onContentSizeChange && !CGSizeEqualToSize(_previousContentSize, contentSize)) {
+        _previousContentSize = contentSize;
         _onContentSizeChange(@{
             @"contentSize": @ {
-                @"height": @(size.height),
-                @"width": @(size.width),
+                @"height": @(contentSize.height),
+                @"width": @(contentSize.width),
             },
             @"target": self.hippyTag,
         });
     }
+    
+    CGSize viewSize = CGSizeMake(CGRectGetWidth(_scrollView.frame), MAX(contentSize.height, self.frame.size.height));
+    _scrollView.contentSize = viewSize;
+    _textView.frame = (CGRect) { CGPointZero, viewSize };
 }
 
 - (void)updatePlaceholder {
@@ -317,11 +336,19 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
         _placeholderView.scrollEnabled = NO;
         _placeholderView.editable = NO;
         _placeholderView.scrollsToTop = NO;
-        _placeholderView.attributedText = [[NSAttributedString alloc] initWithString:_placeholder attributes:@{
+        NSMutableAttributedString *attrStr = [[NSMutableAttributedString alloc] initWithString:_placeholder
+                                                                                    attributes:@{
             NSFontAttributeName: (_textView.font ? _textView.font : [self defaultPlaceholderFont]),
-            NSForegroundColorAttributeName: _placeholderTextColor
+            NSForegroundColorAttributeName: _placeholderTextColor 
         }];
+        if (self.paragraphStyle) {
+            // Apply paragraph style to the entire string
+            [attrStr addAttribute:NSParagraphStyleAttributeName
+                            value:self.paragraphStyle
+                            range:NSMakeRange(0, attrStr.length)];
+        }
         _placeholderView.textAlignment = _textView.textAlignment;
+        _placeholderView.attributedText = attrStr;
 
         [self insertSubview:_placeholderView belowSubview:_textView];
         [self updatePlaceholderVisibility];
@@ -334,6 +361,40 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
 
 - (void)setFont:(UIFont *)font {
     _textView.font = font;
+    [self updatePlaceholder];
+}
+
+- (void)setLineHeight:(NSNumber *)lineHeight {
+    // create paragraphStyle, update placeholder and textView
+    if (!self.paragraphStyle) {
+        self.paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    }
+    self.paragraphStyle.minimumLineHeight = [lineHeight doubleValue];
+    self.paragraphStyle.maximumLineHeight = [lineHeight doubleValue];
+    
+    [self updateParagraphAndFontStyleForTextView:_textView];
+    [self updatePlaceholder];
+}
+
+- (void)setLineSpacing:(NSNumber *)lineSpacing {
+    // create paragraphStyle, update placeholder and textView
+    if (!self.paragraphStyle) {
+        self.paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    }
+    self.paragraphStyle.lineSpacing = [lineSpacing doubleValue];
+    
+    [self updateParagraphAndFontStyleForTextView:_textView];
+    [self updatePlaceholder];
+}
+
+- (void)setLineHeightMultiple:(NSNumber *)lineHeightMultiple {
+    // create paragraphStyle, update placeholder and textView
+    if (!self.paragraphStyle) {
+        self.paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    }
+    self.paragraphStyle.lineHeightMultiple = [lineHeightMultiple doubleValue];
+    
+    [self updateParagraphAndFontStyleForTextView:_textView];
     [self updatePlaceholder];
 }
 
@@ -353,23 +414,20 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
 
 - (void)setContentInset:(UIEdgeInsets)contentInset {
     [super setContentInset:contentInset];
-    //  _contentInset = contentInset;
     [self updateFrames];
 }
 
-- (void)textFieldEditChanged:(NSNotification *)obj {
-    if (self.isFirstResponder && _maxLength) {
-        UITextView *textField = (UITextView *)obj.object;
+- (void)checkMaxLengthAndAlterTextView:(UITextView *)textField {
+    //TODO: This old special logic needs to be optimized.
+    if (self.isFirstResponder && self.maxLength) {
         NSInteger theMaxLength = self.maxLength.integerValue;
         NSString *toBeString = textField.text;
         NSString *lang = [textField.textInputMode primaryLanguage];
         if ([lang isEqualToString:@"zh-Hans"])  // 简体中文输入
         {
-            NSString *toBeString = textField.text;
-
             UITextRange *selectedRange = [textField markedTextRange];
             UITextPosition *position = [textField positionFromPosition:selectedRange.start offset:0];
-
+            
             if (!position) {
                 if (toBeString.length > theMaxLength) {
                     NSRange rangeIndex = [toBeString rangeOfComposedCharacterSequenceAtIndex:theMaxLength];
@@ -394,6 +452,138 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
             }
         }
     }
+}
+
+- (void)textFieldEditChanged:(NSNotification *)obj {
+    [self checkMaxLengthAndAlterTextView:(UITextView *)obj.object];
+}
+
+- (NSString *)text {
+    return _textView.text;
+}
+
+- (void)setSelection:(HippyTextSelection *)selection {
+    if (!selection) {
+        return;
+    }
+
+    UITextRange *currentSelection = _textView.selectedTextRange;
+    UITextPosition *start = [_textView positionFromPosition:_textView.beginningOfDocument offset:selection.start];
+    UITextPosition *end = [_textView positionFromPosition:_textView.beginningOfDocument offset:selection.end];
+    UITextRange *selectedTextRange = [_textView textRangeFromPosition:start toPosition:end];
+
+    NSInteger eventLag = _nativeEventCount - _mostRecentEventCount;
+    if (eventLag == 0 && ![currentSelection isEqual:selectedTextRange]) {
+        _previousSelectionRange = selectedTextRange;
+        _textView.selectedTextRange = selectedTextRange;
+    } else if (eventLag > HippyTextUpdateLagWarningThreshold) {
+        HippyLogWarn(@"Native TextInput(%@) is %ld events ahead of JS - try to make your JS faster.", self.text, (long)eventLag);
+    }
+}
+
+- (void)setText:(NSString *)text {
+    double version = UIDevice.currentDevice.systemVersion.doubleValue;
+    if (version >= 10.0 && version < 12.0) {
+        text = [text stringByReplacingOccurrencesOfString:@"జ్ఞ‌ా" withString:@" "];
+    }
+
+    NSInteger eventLag = _nativeEventCount - _mostRecentEventCount;
+    if (eventLag == 0 && ![text isEqualToString:_textView.text]) {
+        UITextRange *selection = _textView.selectedTextRange;
+        NSInteger oldTextLength = _textView.text.length;
+
+        _predictedText = text;
+        // Use `attribuedText` instead of `text` to show paragraphStyle
+        _textView.attributedText = [self attributedTextAfterApplyingParagraphStyle:text];
+        [self textViewDidChange:_textView];
+        if (selection.empty) {
+            // maintain cursor position relative to the end of the old text
+            NSInteger start = [_textView offsetFromPosition:_textView.beginningOfDocument toPosition:selection.start];
+            NSInteger offsetFromEnd = oldTextLength - start;
+            NSInteger newOffset = text.length - offsetFromEnd;
+            UITextPosition *position = [_textView positionFromPosition:_textView.beginningOfDocument offset:newOffset];
+            _textView.selectedTextRange = [_textView textRangeFromPosition:position toPosition:position];
+        }
+
+        [self updatePlaceholderVisibility];
+        [self updateContentSize];  // keep the text wrapping when the length of
+        // the textline has been extended longer than the length of textinputView
+    } else if (eventLag > HippyTextUpdateLagWarningThreshold) {
+        HippyLogWarn(@"Native TextInput(%@) is %ld events ahead of JS - try to make your JS faster.", self.text, (long)eventLag);
+    }
+}
+
+- (void)setTextColor:(UIColor *)textColor {
+    _textView.textColor = textColor;
+}
+
+- (UIColor *)textColor {
+    return _textView.textColor;
+}
+
+- (void)updatePlaceholderVisibility {
+    if (_textView.text.length > 0) {
+        [_placeholderView setHidden:YES];
+    } else {
+        [_placeholderView setHidden:NO];
+    }
+}
+
+- (void)setAutoCorrect:(BOOL)autoCorrect {
+    _textView.autocorrectionType = (autoCorrect ? UITextAutocorrectionTypeYes : UITextAutocorrectionTypeNo);
+}
+
+- (BOOL)autoCorrect {
+    return _textView.autocorrectionType == UITextAutocorrectionTypeYes;
+}
+
+
+#pragma mark - UITextViewDelegate
+
+- (BOOL)textViewShouldBeginEditing:(UITextView *)textView {
+    if (_selectTextOnFocus) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [textView selectAll:nil];
+        });
+    }
+    return YES;
+}
+
+- (void)textViewDidBeginEditing:(__unused UITextView *)textView {
+    if (_clearTextOnFocus) {
+        _textView.text = @"";
+        [self updatePlaceholderVisibility];
+    }
+    // update typingAttributes
+    [self updateTypingAttributes];
+}
+
+static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange, NSRange *secondRange) {
+    NSInteger firstMismatch = -1;
+    for (NSUInteger ii = 0; ii < MAX(first.length, second.length); ii++) {
+        if (ii >= first.length || ii >= second.length || [first characterAtIndex:ii] != [second characterAtIndex:ii]) {
+            firstMismatch = ii;
+            break;
+        }
+    }
+
+    if (firstMismatch == -1) {
+        return NO;
+    }
+
+    NSUInteger ii = second.length;
+    NSUInteger lastMismatch = first.length;
+    while (ii > firstMismatch && lastMismatch > firstMismatch) {
+        if ([first characterAtIndex:(lastMismatch - 1)] != [second characterAtIndex:(ii - 1)]) {
+            break;
+        }
+        ii--;
+        lastMismatch--;
+    }
+
+    *firstRange = NSMakeRange(firstMismatch, lastMismatch - firstMismatch);
+    *secondRange = NSMakeRange(firstMismatch, ii - firstMismatch);
+    return YES;
 }
 
 - (BOOL)textView:(HippyUITextView *)textView shouldChangeTextInRange:(NSRange)range replacementText:(NSString *)text {
@@ -438,6 +628,14 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
     if (_blockTextShouldChange) {
         return NO;
     }
+    
+    // maxlength related
+    if (self.maxLength != nil) {
+        if (textView.text.length > self.maxLength.integerValue &&
+            text.length > range.length) {
+            return NO;
+        }
+    }
 
     _nativeUpdatesInFlight = YES;
 
@@ -462,152 +660,7 @@ static NSAttributedString *removeHippyTagFromString(NSAttributedString *string) 
             @"eventCount": @(_nativeEventCount),
         });
     }
-
-    return YES;
-}
-
-- (void)textViewDidChangeSelection:(HippyUITextView *)textView {
-    if (_onSelectionChange && textView.selectedTextRange != _previousSelectionRange
-        && ![textView.selectedTextRange isEqual:_previousSelectionRange]) {
-        _previousSelectionRange = textView.selectedTextRange;
-
-        UITextRange *selection = textView.selectedTextRange;
-        NSInteger start = [textView offsetFromPosition:textView.beginningOfDocument toPosition:selection.start];
-        NSInteger end = [textView offsetFromPosition:textView.beginningOfDocument toPosition:selection.end];
-        _onSelectionChange(@{
-            @"selection": @ {
-                @"start": @(start),
-                @"end": @(end),
-            },
-        });
-
-        if (_onChangeText) {
-            _onChangeText(@{
-                @"text": self.text,
-            });
-        }
-    }
-}
-
-- (NSString *)text {
-    return _textView.text;
-}
-
-- (void)setSelection:(HippyTextSelection *)selection {
-    if (!selection) {
-        return;
-    }
-
-    UITextRange *currentSelection = _textView.selectedTextRange;
-    UITextPosition *start = [_textView positionFromPosition:_textView.beginningOfDocument offset:selection.start];
-    UITextPosition *end = [_textView positionFromPosition:_textView.beginningOfDocument offset:selection.end];
-    UITextRange *selectedTextRange = [_textView textRangeFromPosition:start toPosition:end];
-
-    NSInteger eventLag = _nativeEventCount - _mostRecentEventCount;
-    if (eventLag == 0 && ![currentSelection isEqual:selectedTextRange]) {
-        _previousSelectionRange = selectedTextRange;
-        _textView.selectedTextRange = selectedTextRange;
-    } else if (eventLag > HippyTextUpdateLagWarningThreshold) {
-        HippyLogWarn(@"Native TextInput(%@) is %ld events ahead of JS - try to make your JS faster.", self.text, (long)eventLag);
-    }
-}
-
-- (void)setText:(NSString *)text {
-    double version = UIDevice.currentDevice.systemVersion.doubleValue;
-    if (version >= 10.0 && version < 12.0) {
-        text = [text stringByReplacingOccurrencesOfString:@"జ్ఞ‌ా" withString:@" "];
-    }
-
-    NSInteger eventLag = _nativeEventCount - _mostRecentEventCount;
-    if (eventLag == 0 && ![text isEqualToString:_textView.text]) {
-        UITextRange *selection = _textView.selectedTextRange;
-        NSInteger oldTextLength = _textView.text.length;
-
-        _predictedText = text;
-        _textView.text = text;
-        [self textViewDidChange:_textView];
-        if (selection.empty) {
-            // maintain cursor position relative to the end of the old text
-            NSInteger start = [_textView offsetFromPosition:_textView.beginningOfDocument toPosition:selection.start];
-            NSInteger offsetFromEnd = oldTextLength - start;
-            NSInteger newOffset = text.length - offsetFromEnd;
-            UITextPosition *position = [_textView positionFromPosition:_textView.beginningOfDocument offset:newOffset];
-            _textView.selectedTextRange = [_textView textRangeFromPosition:position toPosition:position];
-        }
-
-        [self updatePlaceholderVisibility];
-        [self updateContentSize];  // keep the text wrapping when the length of
-        // the textline has been extended longer than the length of textinputView
-    } else if (eventLag > HippyTextUpdateLagWarningThreshold) {
-        HippyLogWarn(@"Native TextInput(%@) is %ld events ahead of JS - try to make your JS faster.", self.text, (long)eventLag);
-    }
-}
-
-- (void)setTextColor:(UIColor *)textColor {
-    _textView.textColor = textColor;
-}
-
-- (UIColor *)textColor {
-    return _textView.textColor;
-}
-
-- (void)updatePlaceholderVisibility {
-    if (_textView.text.length > 0) {
-        [_placeholderView setHidden:YES];
-    } else {
-        [_placeholderView setHidden:NO];
-    }
-}
-
-- (void)setAutoCorrect:(BOOL)autoCorrect {
-    _textView.autocorrectionType = (autoCorrect ? UITextAutocorrectionTypeYes : UITextAutocorrectionTypeNo);
-}
-
-- (BOOL)autoCorrect {
-    return _textView.autocorrectionType == UITextAutocorrectionTypeYes;
-}
-
-- (BOOL)textViewShouldBeginEditing:(UITextView *)textView {
-    if (_selectTextOnFocus) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [textView selectAll:nil];
-        });
-    }
-    return YES;
-}
-
-- (void)textViewDidBeginEditing:(__unused UITextView *)textView {
-    if (_clearTextOnFocus) {
-        _textView.text = @"";
-        [self updatePlaceholderVisibility];
-    }
-}
-
-static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange, NSRange *secondRange) {
-    NSInteger firstMismatch = -1;
-    for (NSUInteger ii = 0; ii < MAX(first.length, second.length); ii++) {
-        if (ii >= first.length || ii >= second.length || [first characterAtIndex:ii] != [second characterAtIndex:ii]) {
-            firstMismatch = ii;
-            break;
-        }
-    }
-
-    if (firstMismatch == -1) {
-        return NO;
-    }
-
-    NSUInteger ii = second.length;
-    NSUInteger lastMismatch = first.length;
-    while (ii > firstMismatch && lastMismatch > firstMismatch) {
-        if ([first characterAtIndex:(lastMismatch - 1)] != [second characterAtIndex:(ii - 1)]) {
-            break;
-        }
-        ii--;
-        lastMismatch--;
-    }
-
-    *firstRange = NSMakeRange(firstMismatch, lastMismatch - firstMismatch);
-    *secondRange = NSMakeRange(firstMismatch, ii - firstMismatch);
+    
     return YES;
 }
 
@@ -635,6 +688,9 @@ static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange,
     if (!self.hippyTag || !_onChangeText) {
         return;
     }
+    
+    // check maxLength before send event to js
+    [self checkMaxLengthAndAlterTextView:textView];
 
     // When the context size increases, iOS updates the contentSize twice; once
     // with a lower height, then again with the correct height. To prevent a
@@ -658,13 +714,31 @@ static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange,
     });
 }
 
-- (void)textViewDidEndEditing:(__unused UITextView *)textView {
-    if (_onEndEditing) {
-        _onEndEditing(@{
-            @"text": textView.text,
+- (void)textViewDidChangeSelection:(HippyUITextView *)textView {
+    if (_onSelectionChange && textView.selectedTextRange != _previousSelectionRange
+        && ![textView.selectedTextRange isEqual:_previousSelectionRange]) {
+        _previousSelectionRange = textView.selectedTextRange;
+
+        UITextRange *selection = textView.selectedTextRange;
+        NSInteger start = [textView offsetFromPosition:textView.beginningOfDocument toPosition:selection.start];
+        NSInteger end = [textView offsetFromPosition:textView.beginningOfDocument toPosition:selection.end];
+        _onSelectionChange(@{
+            @"selection": @ {
+                @"start": @(start),
+                @"end": @(end),
+            },
         });
+
+        if (_onChangeText) {
+            _onChangeText(@{
+                @"text": self.text,
+            });
+        }
     }
 }
+
+
+#pragma mark - Responder Chain
 
 - (BOOL)isFirstResponder {
     return [_textView isFirstResponder];
@@ -708,18 +782,9 @@ static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange,
     [self setText:value];
 }
 
-- (void)setFontSize:(NSNumber *)fontSize {
-    _fontSize = fontSize;
-
-    if ([fontSize floatValue] > 0) {
-        [self setFont:[UIFont systemFontOfSize:[fontSize floatValue]]];
-    }
-}
-
 - (void)setDefaultValue:(NSString *)defaultValue {
     if (defaultValue) {
         [self setText:defaultValue];
-
         _defaultValue = defaultValue;
     }
 }
@@ -763,6 +828,45 @@ static BOOL findMismatch(NSString *first, NSString *second, NSRange *firstRange,
     if (_textView) {
         _textView.keyboardAppearance = UIKeyboardAppearanceDefault;
     }
+}
+
+#pragma mark - ParagraphStyle Related
+
+- (void)updateTypingAttributes {
+    if (self.paragraphStyle) {
+        // Set typingAttributes if needed
+        NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
+        attrs[NSParagraphStyleAttributeName] = self.paragraphStyle;
+        if (_textView.font) {
+            attrs[NSFontAttributeName] = _textView.font;
+        }
+        _textView.typingAttributes = attrs;
+    }
+}
+
+- (NSAttributedString *)attributedTextAfterApplyingParagraphStyle:(NSString *)text {
+    NSMutableAttributedString *attributedString = [[NSMutableAttributedString alloc] initWithString:text];
+    
+    if (self.paragraphStyle) {
+        // add paragraph style to the entire string
+        [attributedString addAttribute:NSParagraphStyleAttributeName
+                                 value:self.paragraphStyle
+                                 range:NSMakeRange(0, attributedString.length)];
+    }
+    if (_textView.font) {
+        // add font style to the entire string
+        [attributedString addAttribute:NSFontAttributeName
+                                 value:_textView.font
+                                 range:NSMakeRange(0, attributedString.length)];
+    }
+    return attributedString;
+}
+
+- (void)updateParagraphAndFontStyleForTextView:(UITextView *)textView {
+    if (textView.text.length == 0) {
+        return;
+    }
+    textView.attributedText = [self attributedTextAfterApplyingParagraphStyle:textView.text];
 }
 
 @end

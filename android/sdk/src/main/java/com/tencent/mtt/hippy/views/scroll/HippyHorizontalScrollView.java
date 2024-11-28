@@ -69,7 +69,7 @@ public class HippyHorizontalScrollView extends HorizontalScrollView implements H
   protected int mScrollEventThrottle = 10;
   private long mLastScrollEventTimeStamp = -1;
   private boolean mHasUnsentScrollEvent;
-
+  private int mScrollRange = 0;
   protected int mScrollMinOffset = 0;
   private int startScrollX = 0;
   private int mLastX = 0;
@@ -268,17 +268,6 @@ public class HippyHorizontalScrollView extends HorizontalScrollView implements H
       return true;
     }
     return false;
-  }
-
-  @Override
-  public int getOverScrollMode() {
-    // If nested scrolling occurs, remove the overScrollMode to avoid triggering the rebound effect
-    // by mistake
-    if (!hasNestedScrollingParent() || getNestedScrollPriority(DIRECTION_LEFT) == Priority.NONE
-      && getNestedScrollPriority(DIRECTION_RIGHT) == Priority.NONE) {
-      return super.getOverScrollMode();
-    }
-    return OVER_SCROLL_NEVER;
   }
 
   @Override
@@ -495,7 +484,15 @@ public class HippyHorizontalScrollView extends HorizontalScrollView implements H
 
   @Override
   public void scrollToInitContentOffset() {
+    int scrollRange = mScrollRange;
+    View firstChild = getChildAt(0);
+    if (firstChild != null) {
+      mScrollRange = firstChild.getWidth();
+    }
     if (hasCompleteFirstBatch) {
+      if (mScrollRange < scrollRange) {
+        scrollTo(getScrollX(), getScrollY());
+      }
       return;
     }
 
