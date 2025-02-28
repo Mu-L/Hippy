@@ -43,9 +43,9 @@
     self.text = tempPwdStr;
 }
 
-- (void)setEditable:(BOOL)editable {
-    _editable = editable;
-    [self setEnabled:editable];
+- (void)setCanEdit:(BOOL)canEdit {
+    _canEdit = canEdit;
+    [self setEnabled:canEdit];
 }
 
 - (void)paste:(id)sender {
@@ -99,11 +99,6 @@
     }
 }
 
-- (void)dealloc {
-    _responderDelegate = nil;
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
 @end
 
 @interface HippyTextField () <HippyUITextFieldResponseDelegate>
@@ -114,6 +109,10 @@
     HippyUITextField *_textView;
 }
 
+@dynamic lineHeight;
+@dynamic lineSpacing;
+@dynamic lineHeightMultiple;
+
 - (void)keyboardWillShow:(NSNotification *)aNotification {
     [super keyboardWillShow:aNotification];
     NSDictionary *userInfo = [aNotification userInfo];
@@ -122,6 +121,13 @@
     CGFloat keyboardHeight = keyboardRect.size.height;
     if (_textView.isFirstResponder && _onKeyboardWillShow) {
         _onKeyboardWillShow(@{ @"keyboardHeight": @(keyboardHeight) });
+    }
+}
+
+- (void)keyboardWillHide:(NSNotification *)aNotification {
+    [super keyboardWillHide:aNotification];
+    if (_onKeyboardWillHide) {
+        _onKeyboardWillHide(@{});
     }
 }
 
@@ -185,15 +191,6 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
 }
 
 - (void)textFieldDidChange {
-    UITextRange *selectedRange = [_textView markedTextRange];
-    NSString *newText = [_textView textInRange:selectedRange];
-    /**获取中文输入法下高亮部分并直接返回不做_onChangeText */
-    if (newText.length > 0) {
-        return;
-    }
-    // selectedTextRange observer isn't triggered when you type even though the
-    // cursor position moves, so we send event again here.
-
     if (!self.hippyTag || !_onChangeText) {
         return;
     }
@@ -366,13 +363,6 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
     _text = text;
 }
 
-- (void)setFontSize:(NSNumber *)fontSize {
-    _fontSize = fontSize;
-    if ([fontSize floatValue] > 0) {
-        [_textView setFont:[UIFont systemFontOfSize:[fontSize floatValue]]];
-    }
-}
-
 - (void)setValue:(NSString *)value {
     [_textView setText:value];
 }
@@ -443,6 +433,21 @@ HIPPY_NOT_IMPLEMENTED(-(instancetype)initWithCoder : (NSCoder *)aDecoder)
         return NO;
     }
     return YES;
+}
+
+
+#pragma mark - LineHeight Related
+
+- (void)setLineHeight:(NSNumber *)lineHeight {
+    // LineHeight does not take effect on single-line input.
+}
+
+- (void)setLineSpacing:(NSNumber *)lineSpacing {
+    // LineSpacing does not take effect on single-line input.
+}
+
+- (void)setLineHeightMultiple:(NSNumber *)lineHeightMultiple {
+    // LineHeightMultiple does not take effect on single-line input.
 }
 
 @end

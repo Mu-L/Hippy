@@ -27,6 +27,13 @@
 #import "HippyViewPagerItem.h"
 #import "HippyI18nUtils.h"
 
+
+static NSString *const HippyPageScrollStateKey = @"pageScrollState";
+static NSString *const HippyPageScrollStateIdle = @"idle";
+static NSString *const HippyPageScrollStateSettling = @"settling";
+static NSString *const HippyPageScrollStateDragging = @"dragging";
+
+
 @interface HippyViewPager ()
 @property (nonatomic, strong) NSMutableArray<UIView *> *viewPagerItems;
 @property (nonatomic, assign) BOOL isScrolling;
@@ -35,6 +42,7 @@
 @property (nonatomic, assign) CGRect previousFrame;
 @property (nonatomic, assign) CGSize previousSize;
 @property (nonatomic, copy) NSHashTable<id<UIScrollViewDelegate>> *scrollViewListener;
+@property (nonatomic, strong) NSHashTable<id<HippyScrollableLayoutDelegate>> *layoutDelegates;
 @property (nonatomic, assign) NSUInteger lastPageIndex;
 @property (nonatomic, assign) CGFloat targetContentOffsetX;
 @property (nonatomic, assign) BOOL didFirstTimeLayout;
@@ -43,6 +51,10 @@
 
 @property (nonatomic, assign) CGFloat previousStopOffset;
 @property (nonatomic, assign) NSUInteger lastPageSelectedCallbackIndex;
+
+/// A weak property used to record the currently displayed item,
+/// which is used for updating the page index when the data changes.
+@property (nonatomic, weak) UIView *lastSelectedPageItem;
 
 @end
 
@@ -60,6 +72,7 @@
         self.previousFrame = CGRectZero;
         self.scrollViewListener = [NSHashTable weakObjectsHashTable];
         self.lastPageIndex = NSUIntegerMax;
+        self.lastPageSelectedCallbackIndex = NSUIntegerMax;
         self.targetContentOffsetX = CGFLOAT_MAX;
         if (@available(iOS 11.0, *)) {
             self.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
@@ -128,15 +141,36 @@
 }
 
 - (void)hippySetFrame:(CGRect)frame {
-    [super hippySetFrame:frame];
-    self.needsLayoutItems = YES;
-    self.needsResetPageIndex = YES;
-    [self setNeedsLayout];
+    if (!CGRectEqualToRect(self.bounds, frame)) {
+        [super hippySetFrame:frame];
+        self.needsLayoutItems = YES;
+        self.needsResetPageIndex = YES;
+        [self setNeedsLayout];
+    }
 }
 
 - (void)didUpdateHippySubviews {
     [super didUpdateHippySubviews];
     self.needsLayoutItems = YES;
+    
+    // Update the latest page index based on the currently displayed item (aka lastSelectedPageItem).
+    // Keep the same logic as android:
+    // 1. If the previous item only changes its location,
+    //    update the current location and keep the current item displayed.
+    // 2. If the previous item does not exist, do not adjust the position,
+    //    but keep the current position in the valid range (that is, 0 ~ count-1).
+    UIView *previousSelectedItem = self.lastSelectedPageItem;
+    NSUInteger updatedPageIndex;
+    if (previousSelectedItem) {
+        updatedPageIndex = [self.viewPagerItems indexOfObject:previousSelectedItem];
+    } else {
+        updatedPageIndex = MAX(0, MIN(self.lastPageIndex, self.viewPagerItems.count - 1));
+    }
+    if (self.lastPageIndex != updatedPageIndex) {
+        self.lastPageIndex = updatedPageIndex;
+        self.needsResetPageIndex = YES;
+    }
+    
     [self setNeedsLayout];
 }
 
@@ -153,11 +187,23 @@
 
     _lastPageIndex = pageNumber;
     UIView *theItem = self.viewPagerItems[pageNumber];
+    self.lastSelectedPageItem = theItem;
     self.targetContentOffsetX = CGRectGetMinX(theItem.frame);
     [self setContentOffset:theItem.frame.origin animated:animated];
     [self invokePageSelected:pageNumber];
-    if (self.onPageScrollStateChanged) {
-        self.onPageScrollStateChanged(@{ @"pageScrollState": @"idle" });
+    
+    if (animated) {
+        if (self.onPageScrollStateChanged) {
+            HippyLogTrace(@"[HippyViewPager] settling --- (setPage withAnimation)");
+            self.onPageScrollStateChanged(@{ HippyPageScrollStateKey: HippyPageScrollStateSettling });
+        }
+    } else {
+        if (self.onPageScrollStateChanged) {
+            HippyLogTrace(@"[HippyViewPager] idle ~~~~~~ (setPage withoutAnimation)");
+            self.onPageScrollStateChanged(@{ HippyPageScrollStateKey: HippyPageScrollStateIdle });
+        }
+        // Record stop offset for onPageScroll callback
+        [self recordScrollStopOffsetX];
     }
 }
 
@@ -165,26 +211,26 @@
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
 
     CGFloat currentContentOffset = self.contentOffset.x;
+    CGFloat pageWidth = CGRectGetWidth(self.bounds);
     CGFloat offset = currentContentOffset - self.previousStopOffset;
-    CGFloat offsetRatio = offset / CGRectGetWidth(self.bounds);
+    CGFloat offsetRatio = fmod((offset / pageWidth), 1.0 + DBL_EPSILON);
     
-    if (offsetRatio > 1) {
-        offsetRatio -= floor(offsetRatio);
-    }
-    if (offsetRatio < -1) {
-        offsetRatio -= ceil(offsetRatio);
-    }
+    // get current base page index
+    NSUInteger currentPageIndex = floor(currentContentOffset / pageWidth);
     
-    NSUInteger currentPageIndex = [self currentPageIndex];
-    NSInteger nextPageIndex = ceil(offsetRatio) == offsetRatio ? currentPageIndex : currentPageIndex + ceil(offsetRatio);
+    // If offsetRatio is 1.0, then currentPageIndex is nextPageIndex, else nextPageIndex add/subtract 1.
+    // The theoretical maximum gap is 2 DBL_EPSILON, take 10 to allow for some redundancy.
+    BOOL isRatioEqualTo1 = (fabs(ceil(offsetRatio) - offsetRatio) < 10 * DBL_EPSILON);
+    NSInteger nextPageIndex = isRatioEqualTo1  ? currentPageIndex : currentPageIndex + ceil(offsetRatio);
     if (nextPageIndex < 0) {
         nextPageIndex = 0;
-    }
-    if (nextPageIndex >= [self.viewPagerItems count]) {
+    } else if (nextPageIndex >= [self.viewPagerItems count]) {
         nextPageIndex = [self.viewPagerItems count] - 1;
     }
     
     if (self.onPageScroll) {
+        HippyLogTrace(@"[HippyViewPager] CurrentPage:%ld NextPage:%ld Ratio:%f, %f-%f-%f",
+                      currentPageIndex, nextPageIndex, offsetRatio, pageWidth, currentContentOffset, offset);
         self.onPageScroll(@{
             @"position": @(nextPageIndex),
             @"offset": @(offsetRatio),
@@ -198,7 +244,6 @@
     }
 }
 
-//用户拖拽的开始，也是整个滚动流程的开始
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     self.isScrolling = YES;
     self.targetContentOffsetX = CGFLOAT_MAX;
@@ -208,11 +253,42 @@
         }
     }
     if (self.onPageScrollStateChanged) {
-        self.onPageScrollStateChanged(@{ @"pageScrollState": @"dragging" });
+        HippyLogTrace(@"[HippyViewPager] dragging --- (BeginDragging)");
+        self.onPageScrollStateChanged(@{ HippyPageScrollStateKey : HippyPageScrollStateDragging });
     }
 }
 
 - (void)scrollViewWillEndDragging:(UIScrollView *)scrollView withVelocity:(CGPoint)velocity targetContentOffset:(inout CGPoint *)targetContentOffset {
+    // Note: In rare exception scenarios, targetContentOffset may deviate from expectations,
+    //   adding protection for this extreme scenario.
+    // Trigger condition: 
+    //   The expected scrolling range is more than 1 page item,
+    //   and targetOffsetX is in the opposite direction of the drag.
+    CGFloat currentOffsetX = self.contentOffset.x;
+    CGFloat targetOffsetX = targetContentOffset->x;
+    CGFloat pageWidth = CGRectGetWidth(self.bounds);
+    if (pageWidth > DBL_EPSILON && fabs(targetOffsetX - currentOffsetX) > pageWidth &&
+        (velocity.x) * (targetOffsetX - currentOffsetX) < DBL_EPSILON) {
+        // Corrected value is calculated in the same way as in the scrollViewDidScroll method,
+        // taking the next nearest item.
+        CGFloat offsetDelta = currentOffsetX - self.previousStopOffset;
+        CGFloat offsetRatio = fmod((offsetDelta / CGRectGetWidth(self.bounds)), 1.0 + DBL_EPSILON);
+        NSUInteger currentPageIndex = [self currentPageIndex];
+        NSInteger nextPageIndex = ceil(offsetRatio) == offsetRatio ? currentPageIndex : currentPageIndex + ceil(offsetRatio);
+        if (nextPageIndex < 0) {
+            nextPageIndex = 0;
+        } else if (nextPageIndex >= [self.viewPagerItems count]) {
+            nextPageIndex = [self.viewPagerItems count] - 1;
+        }
+        
+        UIView *theItem = self.viewPagerItems[nextPageIndex];
+        CGFloat correctedOffsetX = CGRectGetMinX(theItem.frame);
+        targetContentOffset->x = correctedOffsetX;
+        HippyLogWarn(@"Unexpected targetContentOffsetX(%f) received in HippyViewPager!\n"
+                     "ScrollView:%@, current offset:%f, velocity:%f\n"
+                     "Auto corrected to %f", targetOffsetX, scrollView, currentOffsetX, velocity.x, correctedOffsetX);
+    }
+    
     self.targetContentOffsetX = targetContentOffset->x;
     NSUInteger page = [self targetPageIndexFromTargetContentOffsetX:self.targetContentOffsetX];
     [self invokePageSelected:page];
@@ -233,8 +309,9 @@
         self.isScrolling = NO;
     }
     if (self.onPageScrollStateChanged) {
-        NSString *state = decelerate ? @"settling" : @"idle";
-        self.onPageScrollStateChanged(@{ @"pageScrollState": state });
+        NSString *state = decelerate ? HippyPageScrollStateSettling : HippyPageScrollStateIdle;
+        HippyLogTrace(@"[HippyViewPager] %@ ??? (EndDragging)", state);
+        self.onPageScrollStateChanged(@{ HippyPageScrollStateKey : state });
     }
 }
 
@@ -248,7 +325,8 @@
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
     if (self.onPageScrollStateChanged) {
-        self.onPageScrollStateChanged(@{ @"pageScrollState": @"idle" });
+        HippyLogTrace(@"[HippyViewPager] idle ~~~~~~ (EndDecelerating)");
+        self.onPageScrollStateChanged(@{ HippyPageScrollStateKey : HippyPageScrollStateIdle });
     }
     self.isScrolling = NO;
     for (NSObject<UIScrollViewDelegate> *scrollViewListener in _scrollViewListener) {
@@ -259,6 +337,12 @@
 }
 
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView {
+    self.isScrolling = NO;
+    if (self.onPageScrollStateChanged) {
+        HippyLogTrace(@"[HippyViewPager] idle ~~~~~~ (DidEndScrollingAnimation)");
+        self.onPageScrollStateChanged(@{ HippyPageScrollStateKey : HippyPageScrollStateIdle });
+    }
+    
     for (NSObject<UIScrollViewDelegate> *scrollViewListener in _scrollViewListener) {
         if ([scrollViewListener respondsToSelector:@selector(scrollViewDidEndScrollingAnimation:)]) {
             [scrollViewListener scrollViewDidEndScrollingAnimation:scrollView];
@@ -274,17 +358,42 @@
     }
 }
 
-- (void)scrollViewDidEndScrolling {
-    self.previousStopOffset = [self contentOffset].x;
+- (void)recordScrollStopOffsetX {
+    // Delay a bit to avoid recording offset of unfinished state
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.previousStopOffset = [self contentOffset].x;
+    });
 }
 
-#pragma mark scrollview listener methods
+#pragma mark - scrollview listener methods
+
+- (UIScrollView *)realScrollView {
+    return self;
+}
+
+- (NSHashTable *)scrollListeners {
+    return _scrollViewListener;
+}
+
 - (void)addScrollListener:(id<UIScrollViewDelegate>)scrollListener {
     [_scrollViewListener addObject:scrollListener];
 }
 
 - (void)removeScrollListener:(id<UIScrollViewDelegate>)scrollListener {
     [_scrollViewListener removeObject:scrollListener];
+}
+
+- (void)addHippyScrollableLayoutDelegate:(id<HippyScrollableLayoutDelegate>)delegate {
+    HippyAssertMainThread();
+    if (!self.layoutDelegates) {
+        self.layoutDelegates = [NSHashTable weakObjectsHashTable];
+    }
+    [self.layoutDelegates addObject:delegate];
+}
+
+- (void)removeHippyScrollableLayoutDelegate:(id<HippyScrollableLayoutDelegate>)delegate {
+    HippyAssertMainThread();
+    [self.layoutDelegates removeObject:delegate];
 }
 
 #pragma mark other methods
@@ -300,7 +409,7 @@
 
 - (void)setIsScrolling:(BOOL)isScrolling {
     if (!isScrolling) {
-        [self scrollViewDidEndScrolling];
+        [self recordScrollStopOffsetX];
     }
     _isScrolling = isScrolling;
 }
@@ -335,6 +444,7 @@
     }
     if (_lastPageIndex != thePage) {
         _lastPageIndex = thePage;
+        _lastSelectedPageItem = self.viewPagerItems[thePage];
         return thePage;
     } else {
         return _lastPageIndex;
@@ -361,7 +471,6 @@
 - (void)hippyBridgeDidFinishTransaction {
     BOOL isFrameEqual = CGRectEqualToRect(self.frame, self.previousFrame);
     BOOL isContentSizeEqual = CGSizeEqualToSize(self.contentSize, self.previousSize);
-
     if (!isContentSizeEqual || !isFrameEqual) {
         self.previousFrame = self.frame;
         self.previousSize = self.contentSize;
@@ -397,19 +506,27 @@
         return;
     }
 
-    self.contentSize = CGSizeMake(
-                                  lastViewPagerItem.frame.origin.x + lastViewPagerItem.frame.size.width,
-                                  lastViewPagerItem.frame.origin.y + lastViewPagerItem.frame.size.height
-                                  );
+    CGSize updatedSize = CGSizeMake(lastViewPagerItem.frame.origin.x + lastViewPagerItem.frame.size.width,
+                                    lastViewPagerItem.frame.origin.y + lastViewPagerItem.frame.size.height);
+    if (!CGSizeEqualToSize(self.contentSize, updatedSize)) {
+        self.contentSize = updatedSize;
+    }
+    
     if (!_didFirstTimeLayout) {
         [self setPage:self.initialPage animated:NO];
         _didFirstTimeLayout = YES;
         self.needsResetPageIndex= NO;
-    }
-    else {
+    } else {
         if (self.needsResetPageIndex) {
             [self setPage:_lastPageIndex animated:NO];
             self.needsResetPageIndex= NO;
+        }
+    }
+    
+    // Notify delegates of HippyScrollableLayoutDelegate
+    for (id<HippyScrollableLayoutDelegate> layoutDelegate in self.layoutDelegates) {
+        if ([layoutDelegate respondsToSelector:@selector(scrollableDidLayout:)]) {
+            [layoutDelegate scrollableDidLayout:self];
         }
     }
 }

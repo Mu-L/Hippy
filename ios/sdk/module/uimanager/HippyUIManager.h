@@ -29,7 +29,7 @@
 #import "HippyRootView.h"
 
 @class HippyVirtualNode;
-@class HippyExtAnimationViewParams;
+@class HippyNextAnimationViewParams;
 
 typedef void (^HippyViewUpdateCompletedBlock)(HippyUIManager *uiManager);
 
@@ -71,6 +71,18 @@ HIPPY_EXTERN NSString *const HippyUIManagerRootViewKey;
  */
 HIPPY_EXTERN NSString *const HippyUIManagerDidEndBatchNotification;
 
+/**
+ * This notification can be sent when the font is registered or modified on the native side
+ * and hippy needs to be refreshed.
+ *
+ * `notification.object` can carry rootTag to filter the RootView that needs to be refreshed.
+ *  Default value nil indicating that a refresh is required.
+ */
+HIPPY_EXTERN NSString *const HippyFontChangeTriggerNotification;
+
+
+#pragma mark -
+
 @protocol HippyScrollableProtocol;
 
 /**
@@ -89,6 +101,11 @@ HIPPY_EXTERN NSString *const HippyUIManagerDidEndBatchNotification;
 - (UIView *)viewForHippyTag:(NSNumber *)hippyTag;
 
 /**
+ * Gets the shadowView associated with hippyTag.
+ */
+- (HippyShadowView *)shadowViewForHippyTag:(NSNumber *)hippyTag;
+
+/**
  * Gets the node associated with a hippyTag.
  */
 - (HippyVirtualNode *)nodeForHippyTag:(NSNumber *)hippyTag;
@@ -104,13 +121,6 @@ HIPPY_EXTERN NSString *const HippyUIManagerDidEndBatchNotification;
  * Use UIViewNoIntrinsicMetric to ignore a dimension.
  */
 - (void)setIntrinsicContentSize:(CGSize)size forView:(UIView *)view;
-
-/**
- * Update the background color of a view. The source of truth for
- * backgroundColor is the shadow view, so if to update backgroundColor from
- * native code you will need to call this method.
- */
-- (void)setBackgroundColor:(UIColor *)color forView:(UIView *)view;
 
 /**
  * Schedule a block to be executed on the UI thread. Useful if you need to execute
@@ -162,8 +172,16 @@ HIPPY_EXTERN NSString *const HippyUIManagerDidEndBatchNotification;
 
 - (void)removeNativeNode:(HippyVirtualNode *)node;
 - (void)removeNativeNodeView:(UIView *)nodeView;
-- (void)updateViewsFromParams:(NSArray<HippyExtAnimationViewParams *> *)params completion:(HippyViewUpdateCompletedBlock)block;
+- (void)removeNativeViewFromTags:(NSArray<NSNumber *> *)hippyTags;
+- (void)updateViewsFromParams:(NSArray<HippyNextAnimationViewParams *> *)params completion:(HippyViewUpdateCompletedBlock)block;
 - (void)updateViewWithHippyTag:(NSNumber *)hippyTag props:(NSDictionary *)pros;
+
+/// Used for animation module to update the properties of the specified node.
+/// - Parameters:
+///   - hippyTag: the hippyTag
+///   - props: updated props
+- (void)updateViewFromAnimationWithHippyTag:(NSNumber *)hippyTag props:(NSDictionary *)props;
+
 @end
 
 /**

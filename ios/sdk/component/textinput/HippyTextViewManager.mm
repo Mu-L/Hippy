@@ -36,37 +36,36 @@
 HIPPY_EXPORT_MODULE(TextInput)
 
 - (UIView *)view {
-    // todo: 最佳实践？
-    NSNumber *mutiline = self.props[@"multiline"];
+    // TODO: unify into one implementation
+    NSNumber *multiline = self.props[@"multiline"];
     NSString *keyboardType = self.props[@"keyboardType"];
     if ([keyboardType isKindOfClass:[NSString class]] && [keyboardType isEqual:@"password"]) {
-        mutiline = @(NO);
+        multiline = @(NO);
     }
     HippyBaseTextInput *theView;
-    if (mutiline != nil && !mutiline.boolValue) {
-        HippyTextField *textField = [[HippyTextField alloc] init];
-        if (self.props[@"onKeyboardWillShow"]) {
-            [[NSNotificationCenter defaultCenter] addObserver:textField selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification
-                                                       object:nil];
-        }
-        if (self.props[@"onKeyboardHeightChanged"]) {
-            [[NSNotificationCenter defaultCenter] addObserver:theView selector:@selector(keyboardHeightChanged:) name:UIKeyboardWillChangeFrameNotification
-                                                       object:nil];
-        }
-        theView = textField;
+    if (multiline != nil && !multiline.boolValue) {
+        theView = [[HippyTextField alloc] init];
     } else {
-        HippyTextView *textView = [[HippyTextView alloc] init];
-        if (self.props[@"onKeyboardWillShow"]) {
-            [[NSNotificationCenter defaultCenter] addObserver:textView selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification
-                                                       object:nil];
-        }
-        if (self.props[@"onKeyboardHeightChanged"]) {
-            [[NSNotificationCenter defaultCenter] addObserver:textView selector:@selector(keyboardHeightChanged:) name:UIKeyboardWillChangeFrameNotification
-                                                       object:nil];
-        }
-        theView = textView;
+        theView = [[HippyTextView alloc] init];
     }
-
+    if (self.props[@"onKeyboardWillShow"]) {
+        [[NSNotificationCenter defaultCenter] addObserver:theView
+                                                 selector:@selector(keyboardWillShow:)
+                                                     name:UIKeyboardWillShowNotification
+                                                   object:nil];
+    }
+    if (self.props[@"onKeyboardWillHide"]) {
+        [[NSNotificationCenter defaultCenter] addObserver:theView
+                                                 selector:@selector(keyboardWillHide:)
+                                                     name:UIKeyboardWillHideNotification
+                                                   object:nil];
+    }
+    if (self.props[@"onKeyboardHeightChanged"]) {
+        [[NSNotificationCenter defaultCenter] addObserver:theView
+                                                 selector:@selector(keyboardHeightChanged:)
+                                                     name:UIKeyboardWillChangeFrameNotification
+                                                   object:nil];
+    }
     return theView;
 }
 
@@ -80,11 +79,11 @@ HIPPY_EXPORT_VIEW_PROPERTY(onKeyPress, HippyDirectEventBlock)
 HIPPY_EXPORT_VIEW_PROPERTY(onBlur, HippyDirectEventBlock)
 HIPPY_EXPORT_VIEW_PROPERTY(onFocus, HippyDirectEventBlock)
 HIPPY_EXPORT_VIEW_PROPERTY(onKeyboardWillShow, HippyDirectEventBlock)
+HIPPY_EXPORT_VIEW_PROPERTY(onKeyboardWillHide, HippyDirectEventBlock)
 HIPPY_EXPORT_VIEW_PROPERTY(onKeyboardHeightChanged, HippyDirectEventBlock)
 HIPPY_EXPORT_VIEW_PROPERTY(defaultValue, NSString)
 HIPPY_EXPORT_VIEW_PROPERTY(isNightMode, BOOL)
 
-// clang-format off
 HIPPY_EXPORT_METHOD(focusTextInput:(nonnull NSNumber *)hippyTag) {
     [self.bridge.uiManager addUIBlock:
      ^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry){
@@ -96,9 +95,7 @@ HIPPY_EXPORT_METHOD(focusTextInput:(nonnull NSNumber *)hippyTag) {
          [view focus];
      }];
 }
-// clang-format on
 
-// clang-format off
 HIPPY_EXPORT_METHOD(isFocused:(nonnull NSNumber *)hippyTag callback:(HippyResponseSenderBlock)callback) {
     [self.bridge.uiManager addUIBlock:
      ^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry){
@@ -112,9 +109,7 @@ HIPPY_EXPORT_METHOD(isFocused:(nonnull NSNumber *)hippyTag callback:(HippyRespon
          callback(callBack);
      }];
 }
-// clang-format on
 
-// clang-format off
 HIPPY_EXPORT_METHOD(blurTextInput:(nonnull NSNumber *)hippyTag) {
     [self.bridge.uiManager addUIBlock:
      ^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry){
@@ -126,9 +121,7 @@ HIPPY_EXPORT_METHOD(blurTextInput:(nonnull NSNumber *)hippyTag) {
          [view blur];
      }];
 }
-// clang-format on
 
-// clang-format off
 HIPPY_EXPORT_METHOD(clear:(nonnull NSNumber *)hippyTag) {
     [self.bridge.uiManager addUIBlock:^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
         HippyBaseTextInput *view = (HippyBaseTextInput *)viewRegistry[hippyTag];
@@ -139,9 +132,7 @@ HIPPY_EXPORT_METHOD(clear:(nonnull NSNumber *)hippyTag) {
         [view clearText];
     }];
 }
-// clang-format on
 
-// clang-format off
 HIPPY_EXPORT_METHOD(setValue:(nonnull NSNumber *)hippyTag
                   text:(NSString *)text ) {
     [self.bridge.uiManager addUIBlock:^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
@@ -153,9 +144,7 @@ HIPPY_EXPORT_METHOD(setValue:(nonnull NSNumber *)hippyTag
         [view setValue: text];
     }];
 }
-// clang-format on
 
-// clang-format off
 HIPPY_EXPORT_METHOD(getValue:(nonnull NSNumber *)hippyTag
                   callback:(HippyResponseSenderBlock)callback ) {
     [self.bridge.uiManager addUIBlock:^(__unused HippyUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
@@ -172,18 +161,28 @@ HIPPY_EXPORT_METHOD(getValue:(nonnull NSNumber *)hippyTag
         callback(callBack);
     }];
 }
-// clang-format on
 
 HIPPY_EXPORT_SHADOW_PROPERTY(text, NSString)
 HIPPY_EXPORT_SHADOW_PROPERTY(placeholder, NSString)
+HIPPY_EXPORT_SHADOW_PROPERTY(lineHeight, NSNumber)
+HIPPY_EXPORT_SHADOW_PROPERTY(lineSpacing, NSNumber)
+HIPPY_EXPORT_SHADOW_PROPERTY(lineHeightMultiple, NSNumber)
 
+HIPPY_EXPORT_SHADOW_PROPERTY(fontSize, NSNumber)
+HIPPY_EXPORT_SHADOW_PROPERTY(fontWeight, NSString)
+HIPPY_EXPORT_SHADOW_PROPERTY(fontStyle, NSString)
+HIPPY_EXPORT_SHADOW_PROPERTY(fontFamily, NSString)
+
+HIPPY_EXPORT_VIEW_PROPERTY(lineHeight, NSNumber)
+HIPPY_EXPORT_VIEW_PROPERTY(lineSpacing, NSNumber)
+HIPPY_EXPORT_VIEW_PROPERTY(lineHeightMultiple, NSNumber)
 HIPPY_REMAP_VIEW_PROPERTY(autoCapitalize, textView.autocapitalizationType, UITextAutocapitalizationType)
 HIPPY_EXPORT_VIEW_PROPERTY(autoCorrect, BOOL)
 HIPPY_EXPORT_VIEW_PROPERTY(blurOnSubmit, BOOL)
 HIPPY_EXPORT_VIEW_PROPERTY(clearTextOnFocus, BOOL)
 HIPPY_REMAP_VIEW_PROPERTY(color, textView.textColor, UIColor)
 HIPPY_REMAP_VIEW_PROPERTY(textAlign, textView.textAlignment, NSTextAlignment)
-HIPPY_REMAP_VIEW_PROPERTY(editable, textView.editable, BOOL)
+HIPPY_REMAP_VIEW_PROPERTY(editable, textView.canEdit, BOOL)
 HIPPY_REMAP_VIEW_PROPERTY(enablesReturnKeyAutomatically, textView.enablesReturnKeyAutomatically, BOOL)
 HIPPY_REMAP_VIEW_PROPERTY(keyboardType, textView.keyboardType, UIKeyboardType)
 HIPPY_REMAP_VIEW_PROPERTY(keyboardAppearance, textView.keyboardAppearance, UIKeyboardAppearance)
@@ -201,37 +200,10 @@ HIPPY_EXPORT_VIEW_PROPERTY(selectTextOnFocus, BOOL)
 HIPPY_EXPORT_VIEW_PROPERTY(selection, HippyTextSelection)
 HIPPY_EXPORT_VIEW_PROPERTY(text, NSString)
 
-HIPPY_CUSTOM_SHADOW_PROPERTY(fontSize, NSNumber, HippyShadowTextView) {
-    view.font = [HippyFont updateFont:view.font withSize:json];
-}
-
-HIPPY_CUSTOM_SHADOW_PROPERTY(fontWeight, NSString, HippyShadowTextView) {
-    view.font = [HippyFont updateFont:view.font withWeight:json];
-}
-
-HIPPY_CUSTOM_SHADOW_PROPERTY(fontStyle, NSString, HippyShadowTextView) {
-    view.font = [HippyFont updateFont:view.font withStyle:json];  // defaults to normal
-}
-
-HIPPY_CUSTOM_SHADOW_PROPERTY(fontFamily, NSString, HippyShadowTextView) {
-    view.font = [HippyFont updateFont:view.font withFamily:json];
-}
-
-HIPPY_CUSTOM_VIEW_PROPERTY(fontSize, NSNumber, HippyBaseTextInput) {
-    UIFont *theFont = [HippyFont updateFont:view.font withSize:json ?: @(defaultView.font.pointSize)];
-    view.font = theFont;
-}
-HIPPY_CUSTOM_VIEW_PROPERTY(fontWeight, NSString, __unused HippyBaseTextInput) {
-    UIFont *theFont = [HippyFont updateFont:view.font withWeight:json];  // defaults to normal
-    view.font = theFont;
-}
-HIPPY_CUSTOM_VIEW_PROPERTY(fontStyle, NSString, __unused HippyBaseTextInput) {
-    UIFont *theFont = [HippyFont updateFont:view.font withStyle:json];
-    view.font = theFont;  // defaults to normal
-}
-HIPPY_CUSTOM_VIEW_PROPERTY(fontFamily, NSString, HippyBaseTextInput) {
-    view.font = [HippyFont updateFont:view.font withFamily:json ?: defaultView.font.familyName];
-}
+HIPPY_EXPORT_VIEW_PROPERTY(fontSize, NSNumber)
+HIPPY_EXPORT_VIEW_PROPERTY(fontWeight, NSString)
+HIPPY_EXPORT_VIEW_PROPERTY(fontStyle, NSString)
+HIPPY_EXPORT_VIEW_PROPERTY(fontFamily, NSString)
 
 - (HippyViewManagerUIBlock)uiBlockToAmendWithShadowView:(HippyShadowView *)shadowView {
     NSNumber *hippyTag = shadowView.hippyTag;
@@ -240,4 +212,5 @@ HIPPY_CUSTOM_VIEW_PROPERTY(fontFamily, NSString, HippyBaseTextInput) {
         viewRegistry[hippyTag].contentInset = padding;
     };
 }
+
 @end
